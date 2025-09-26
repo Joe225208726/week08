@@ -207,6 +207,8 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     });
 
+    //
+
 
     // --- Shopping Cart Functions ---
 
