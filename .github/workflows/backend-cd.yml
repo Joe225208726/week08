@@ -16,6 +16,7 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      # ✅ Use kubeconfig from GitHub Secret instead of Azure login
       - name: Set up kubeconfig from secret
         run: |
           mkdir -p $HOME/.kube
@@ -23,6 +24,7 @@ jobs:
 
       - name: Deploy Backend Infrastructure (Namespace, ConfigMaps, Secrets, Databases)
         run: |
+          echo "Deploying backend infrastructure..."
           kubectl apply -f k8s/configmaps.yaml
           kubectl apply -f k8s/secrets.yaml
           kubectl apply -f k8s/product-db.yaml
@@ -30,29 +32,25 @@ jobs:
 
       - name: Deploy Backend Microservices (Product, Order)
         run: |
+          echo "Deploying backend microservices..."
           kubectl apply -f k8s/product-service.yaml
           kubectl apply -f k8s/order-service.yaml
 
       - name: Wait for Backend LoadBalancer IPs
         run: |
-          echo "Waiting for Product and Order LoadBalancer IPs..."
+          echo "Waiting for Product, Order LoadBalancer IPs to be assigned (up to 5 minutes)..."
           PRODUCT_IP=""
           ORDER_IP=""
 
-          # Adjust service names to match your k8s/*.yaml!
-          PRODUCT_SERVICE_NAME="product-service"
-          ORDER_SERVICE_NAME="order-service"
-
           for i in $(seq 1 60); do
-            PRODUCT_IP=$(kubectl get service $PRODUCT_SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
-            ORDER_IP=$(kubectl get service $ORDER_SERVICE_NAME -o jsonpath='{.status.loadBalancer.ingress[0].ip}' || true)
-
+            PRODUCT_IP=$(kubectl get service product-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+            ORDER_IP=$(kubectl get service order-service-w08e1 -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
             if [[ -n "$PRODUCT_IP" && -n "$ORDER_IP" ]]; then
-              echo "✅ Product Service IP: $PRODUCT_IP"
-              echo "✅ Order Service IP: $ORDER_IP"
+              echo "✅ Backend LoadBalancer IPs assigned!"
+              echo "Product Service IP: $PRODUCT_IP"
+              echo "Order Service IP: $ORDER_IP"
               break
             fi
-            echo "Attempt $i/60... still waiting for IPs"
             sleep 5
           done
 
