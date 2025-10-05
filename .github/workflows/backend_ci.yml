@@ -1,23 +1,28 @@
 name: Backend CI - Test, Build and Push Images to ACR
 
 on:
+  workflow_call:
   workflow_dispatch:
   push:
-    branches:
-      - main
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - ".github/workflows/backend_ci.yml"
+  pull_request:
+    branches: [main]
     paths:
       - "backend/**"
       - ".github/workflows/backend_ci.yml"
 
 env:
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }} # e.g. wk08acr40890.azurecr.io
-  ACR_NAME: ${{ secrets.ACR_NAME }} # e.g. wk08acr40890
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
   test_and_lint_backends:
     runs-on: ubuntu-latest
-
+    strategy:
+      fail-fast: false
     services:
       product_db:
         image: postgres:15
@@ -27,12 +32,8 @@ jobs:
           POSTGRES_DB: products
         options: >-
           --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5432:5432
-
+          --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5432:5432"]
       order_db:
         image: postgres:15
         env:
@@ -41,20 +42,16 @@ jobs:
           POSTGRES_DB: orders
         options: >-
           --health-cmd "pg_isready -U postgres"
-          --health-interval 10s
-          --health-timeout 5s
-          --health-retries 5
-        ports:
-          - 5433:5432
+          --health-interval 10s --health-timeout 5s --health-retries 5
+        ports: ["5433:5432"]
 
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Set up Python 3.10
-        uses: actions/setup-python@v5
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
+          cache: "pip" # <-- speed up
 
       - name: Install dependencies
         run: |
@@ -88,23 +85,27 @@ jobs:
   build_and_push_images:
     runs-on: ubuntu-latest
     needs: test_and_lint_backends
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Docker Login to ACR
-        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.ACR_LOGIN_SERVER }} -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Build and Push Product Service Image
+      - name: ACR Login
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build & Push Product image
         run: |
           docker build -t ${{ env.ACR_LOGIN_SERVER }}/product_service:latest ./backend/product_service/
           docker push ${{ env.ACR_LOGIN_SERVER }}/product_service:latest
 
-      - name: Build and Push Order Service Image
+      - name: Build & Push Order image
         run: |
           docker build -t ${{ env.ACR_LOGIN_SERVER }}/order_service:latest ./backend/order_service/
           docker push ${{ env.ACR_LOGIN_SERVER }}/order_service:latest
 
-      - name: Logout Docker
-        run: docker logout ${{ env.ACR_LOGIN_SERVER }}
+      - name: Logout Azure
+        if: always()
+        run: az logout

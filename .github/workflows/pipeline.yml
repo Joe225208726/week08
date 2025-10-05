@@ -1,0 +1,69 @@
+name: Orchestrated CI/CD
+
+on:
+  push:
+    branches: [main, develop]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+  pull_request:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - ".github/workflows/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  id-token: write
+  actions: read
+
+env:
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
+
+jobs:
+  # ---------- CI on PRs and on develop ----------
+  backend_ci:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_name == 'develop')
+    uses: ./.github/workflows/backend_ci.yml
+    secrets: inherit
+
+  frontend_ci:
+    if: github.event_name == 'pull_request' || (github.event_name == 'push' && github.ref_name == 'develop')
+    uses: ./.github/workflows/frontend_ci.yml
+    secrets: inherit
+
+  # ---------- Full release path on main ----------
+  backend_ci_main:
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    uses: ./.github/workflows/backend_ci.yml
+    secrets: inherit
+
+  backend_cd_main:
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    needs: backend_ci_main
+    uses: ./.github/workflows/backend_cd.yml
+    with:
+      aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+      aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+      aks_acr_name: ${{ vars.AKS_ACR_NAME }}
+    secrets: inherit
+
+  frontend_ci_main:
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    needs: backend_cd_main
+    uses: ./.github/workflows/frontend_ci.yml
+    secrets: inherit
+
+  frontend_cd_main:
+    if: github.event_name == 'push' && github.ref_name == 'main'
+    needs: frontend_ci_main
+    uses: ./.github/workflows/frontend-cd.yml
+    with:
+      product_api_ip: ${{ needs.backend_cd_main.outputs.PRODUCT_API_IP }}
+      order_api_ip: ${{ needs.backend_cd_main.outputs.ORDER_API_IP }}
+      aks_cluster_name: ${{ vars.AKS_CLUSTER_NAME }}
+      aks_resource_group: ${{ vars.AKS_RESOURCE_GROUP }}
+    secrets: inherit

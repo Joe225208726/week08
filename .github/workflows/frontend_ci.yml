@@ -1,38 +1,42 @@
 name: Frontend CI - Build & Push Image
 
 on:
-  # Manual trigger
+  workflow_call:
   workflow_dispatch:
-
-  # Automatically on pushes to main branch
   push:
-    branches:
-      - main
-    paths: # Only trigger if changes are in the frontend directory
+    branches: [main, develop]
+    paths:
+      - "frontend/**"
+      - ".github/workflows/frontend_ci.yml"
+  pull_request:
+    branches: [main]
+    paths:
       - "frontend/**"
       - ".github/workflows/frontend_ci.yml"
 
 env:
-  # ACR Login Server (e.g., wk08acr40890.azurecr.io)
-  ACR_LOGIN_SERVER: ${{ secrets.ACR_LOGIN_SERVER }}
+  ACR_LOGIN_SERVER: ${{ secrets.AZURE_CONTAINER_REGISTRY }}
   IMAGE_TAG: ${{ github.sha }}-${{ github.run_id }}
 
 jobs:
   build_and_push_frontend:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Docker Login to ACR
-        run: echo "${{ secrets.ACR_PASSWORD }}" | docker login ${{ env.ACR_LOGIN_SERVER }} -u "${{ secrets.ACR_USERNAME }}" --password-stdin
+      - name: Azure Login (Service Principal)
+        uses: azure/login@v1
+        with:
+          creds: ${{ secrets.AZURE_CREDENTIALS }}
 
-      - name: Build and Push Frontend Image
+      - name: ACR Login
+        run: az acr login --name ${{ env.ACR_LOGIN_SERVER }}
+
+      - name: Build & Push Frontend image
         run: |
-          docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }} ./frontend/
-          docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:${{ env.IMAGE_TAG }}
+          docker build -t ${{ env.ACR_LOGIN_SERVER }}/frontend:latest ./frontend/
+          docker push ${{ env.ACR_LOGIN_SERVER }}/frontend:latest
 
-      - name: Logout from Docker
-        run: docker logout ${{ env.ACR_LOGIN_SERVER }}
+      - name: Logout Azure
         if: always()
+        run: az logout
